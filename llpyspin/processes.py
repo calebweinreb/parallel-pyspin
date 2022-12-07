@@ -185,9 +185,11 @@ class MainProcess():
 
         # parameters (determined during initialization)
         self._framerate = None
+        self._gain_auto = None
         self._exposure  = None
         self._binsize   = None
         self._format    = None
+        self._gain      = None
         self._roi       = None
         self._stream_buffer_count = None
 
@@ -321,12 +323,23 @@ class MainProcess():
                     pointer.BinningVertical.GetValue()
                 )
                 stream_buffer_count = pointer.TLStream.StreamBufferCountManual.GetValue()
+                gain = pointer.Gain.GetValue()
+
+                gain_auto = {
+                    PySpin.GainAuto_Off        : 'off',
+                    PySpin.GainAuto_Once       : 'once',
+                    PySpin.GainAuto_Continuous : 'continuous'
+                }[pointer.GainAuto.GetValue()]
+
+
 
                 #
                 output = {
                     'framerate' : framerate,
+                    'gain_auto' : gain_auto,
                     'exposure'  : exposure,
                     'binsize'   : binsize,
+                    'gain'      : gain,
                     'roi'       : roi,
                     'stream_buffer_count': stream_buffer_count
                 }
@@ -342,10 +355,12 @@ class MainProcess():
         result, output, message = f(main=self, color=self._color)
 
         self._framerate = output['framerate']
+        self._gain_auto = output['gain_auto']
         self._exposure  = output['exposure']
         self._binsize   = output['binsize']
         self._height    = output['roi'][3]
         self._width     = output['roi'][2]
+        self._gain      = output['gain']
         self._roi       = output['roi']
         self._stream_buffer_count = output['stream_buffer_count']
 
@@ -479,6 +494,124 @@ class MainProcess():
         # update data
         if result:
             self._framerate = value
+
+        return
+
+
+
+    # gain_auto
+    @property
+    def gain_auto(self):
+        """
+        Automatic gain adjustment
+        """
+
+        if self.locked:
+            return self._gain_auto
+
+        @queued
+        def f(child, pointer, **kwargs):
+            try:
+                output =  {
+                    PySpin.GainAuto_Off        : 'off',
+                    PySpin.GainAuto_Once       : 'once',
+                    PySpin.GainAuto_Continuous : 'continuous'
+                }[pointer.GainAuto.GetValue()]
+
+                return True, output, None
+            except PySpin.SpinnakerException:
+                return False, None, 'Failed to query GainAuto property'
+
+        result, output, message = f(main=self)
+
+        return output
+
+    @gain_auto.setter
+    def gain_auto(self, value):
+
+        if self.locked:
+            raise CameraError(f'Camera is locked during acquisition')
+
+        assert value in ['off','once','continuous'], (
+            f'{value} if not a valid value for GainAuto. Use one of '
+            'the following: {"off", "once", "continuous"}')
+
+        @queued
+        def f(child, pointer, **kwargs):
+
+            value = kwargs['value']
+
+            try:
+                pointer.GainAuto.SetValue({
+                    'off'       : PySpin.GainAuto_Off,
+                    'once'      : PySpin.GainAuto_Once,
+                    'continous' : PySpin.GainAuto_Continuous
+                }[value])
+                return True, None, None
+            except PySpin.SpinnakerException:
+                message = f'Failed to set GainAuto to {value}'
+                return False, None, message
+
+        # call
+        result, output, message = f(main=self, value=value)
+
+        # update data
+        if result:
+            self._gain_auto = value
+
+        return
+
+
+
+    # gain
+    @property
+    def gain(self):
+        """
+        Gain in dB
+        """
+
+        if self.locked:
+            return self._gain
+
+        @queued
+        def f(child, pointer, **kwargs):
+            try:
+                output = pointer.Gain.GetValue()
+                return True, output, None
+            except PySpin.SpinnakerException:
+                return False, None, f'Failed to query gain property'
+
+        result, output, message = f(main=self)
+
+        return output
+
+    @gain.setter
+    def gain(self, value):
+
+        if self.locked:
+            raise CameraError(f'Camera is locked during acquisition')
+
+        @queued
+        def f(child, pointer, **kwargs):
+            value = kwargs['value']
+            try:
+                min = pointer.Gain.GetMin()
+                max = pointer.Gain.GetMax()
+
+                if not min <= value <= max:
+                    message = f'Target gain ({value} us) falls outside the range of possible values: {min:.1f}, {max:.1f} dB'
+                    return False, None, message
+
+                else:
+                    pointer.Gain.SetValue(value)
+                    return True, None, None
+
+            except PySpin.SpinnakerException:
+                return False, None,  f'Failed to set gain {value} dB'
+
+        result, output, message = f(self, value=value)
+        if result:
+            self._gain = value
 
         return
 
