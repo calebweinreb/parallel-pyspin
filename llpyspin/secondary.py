@@ -35,7 +35,8 @@ class SecondaryCamera(MainProcess):
         primary_camera_framerate,
         bitrate=1000000,
         backend='Spinnaker',
-        timeout=1
+        timeout=1,
+        sync_to_primary=True,
         ):
         """
         """
@@ -112,16 +113,19 @@ class SecondaryCamera(MainProcess):
                 # main loop
                 while child.acquiring.value:
 
-                    # Wait for the primary camera to begin acquisition of the next frame
-                    if local_frame_counter >= child.shared_frame_counter.value:
-                        continue
+                    if sync_to_primary:
+                        # Wait for the primary camera to begin acquisition of the next frame
+                        if local_frame_counter >= child.shared_frame_counter.value:
+                            continue
 
                     # There's a 1 ms timeout for the call to GetNextImage to prevent
                     # the secondary camera from blocking when video acquisition is
                     # aborted before the primary camera is triggered (see below).
 
                     try:
+                        
                         frame = pointer.GetNextImage(kwargs['timeout'])
+                        
                         if frame.IsIncomplete():
                             continue
                         elif dummy:
@@ -144,10 +148,11 @@ class SecondaryCamera(MainProcess):
 
                 # Empty out the computer's device buffer
                 while True:
-
-                    # Exit the loop if the counters are equal
-                    if local_frame_counter >= child.shared_frame_counter.value:
-                        break
+                    
+                    if sync_to_primary:
+                        # Exit the loop if the counters are equal
+                        if local_frame_counter >= child.shared_frame_counter.value:
+                            break
 
                     try:
                         frame = pointer.GetNextImage(kwargs['timeout'])
